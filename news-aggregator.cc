@@ -3,6 +3,8 @@
  * --------------------------------
  * Presents the implementation of the NewsAggregator class.
  */
+#include <unordered_map>
+#include <unordered_set>
 
 #include "news-aggregator.h"
 #include <iostream>
@@ -130,6 +132,14 @@ void NewsAggregator::queryIndex() const {
   }
 }
 
+struct pair_hash {
+  template<class T1, class T2>
+  std::size_t operator () (const std:: pair<T1, T2> &p) const {
+    auto h1 = std::hash<T1>{}(p.first);
+    auto h2 = std::hash<T2>{}(p.second);
+    return h1^(h2 << 1);
+  }
+};
 /**
  * Private Constructor: NewsAggregator
  * -----------------------------------
@@ -151,55 +161,97 @@ NewsAggregator::NewsAggregator(const string& rssFeedListURI, bool verbose):
  * your multithreaded aggregator.
  */
 void NewsAggregator::processAllFeeds() {
-/*
-  cout << "Parsing feed list RSS file at \"" << rssFeedListURI << "\"...." << endl;
+
   RSSFeedList feedList(rssFeedListURI);
+
+  // parse to store url-title map (feeds) in feedList
   try {
     feedList.parse();
   } catch (const RSSFeedListException& rfle) {
     log.noteFullRSSFeedListDownloadFailureAndExit(rssFeedListURI);
   }
 
+  // get url-title map
   const map<string, string>& feeds = feedList.getFeeds();
-  if (feeds.empty()) {
-    cout << "Feed list is technically well-formed, but it's empty!" << endl;
-    return;
+
+  // for each url in feedlist, store articles of it in RSSfeed, store tokens in html-document
+  unordered_set<string> visitedURLs;
+  // map< pair<serverAndTitle>,  vector<string> tokens>
+  unordered_map<pair<string, string>, vector<string>, pair_hash> tokensMap; 
+  unordered_map<pair<string, string>, Article, pair_hash> articlesMap;
+
+  for (const pair<string, string>& f : feeds) {
+    const string& url = f.first;
+
+    if (visitedURLs.find(url) != visitedURLs.end()) continue; // duplicate url
+    visitedURLs.insert(url);
+
+    RSSFeed feed(url);
+    // store articles in feed
+    try {
+      feed.parse();
+    } catch (const RSSFeedException& rfe) {
+      log.noteSingleFeedDownloadFailure(url);
+      return;
+    }
+
+    // get articles
+    const vector<Article>& articles = feed.getArticles();
+
+    // for each article, store tokens in html-document
+    for (const Article& a : articles) {
+      const string& articleTitle = a.title;
+      const string& articleUrl = a.url;
+
+      const string& server = getURLServer(articleUrl);
+      string articleServer = server;
+      pair<string, string> p_server_title = make_pair(articleServer, articleTitle);
+
+      HTMLDocument document(articleUrl);
+      try {
+        document.parse();
+      } catch (const HTMLDocumentException& hde) {
+        log.noteSingleArticleDownloadFailure(a);
+        return;
+      }
+
+      // get tokens
+      const vector<string>& tokens = document.getTokens();
+      vector<string> currTokens = tokens;
+      sort(currTokens.begin(), currTokens.end());
+
+      unordered_map<pair<string, string>, vector<string>, pair_hash>::iterator it = tokensMap.find(p_server_title);
+      if (it != tokensMap.end()) {
+        // article with same domain and title
+        string& preUrl = articlesMap[p_server_title].url;
+        const string& currUrl = document.getURL();
+
+        // get intersected tokens
+        vector<string>& preTokens = tokensMap[p_server_title];
+        vector<string> intersectTokens;
+        set_intersection(preTokens.cbegin(), preTokens.cend(), currTokens.cbegin(), currTokens.cend(), back_inserter(intersectTokens));
+  
+        if (preUrl.compare(currUrl) < 0) {
+          // update tokensMap and articlesMap of preUrl
+          tokensMap[p_server_title] = intersectTokens;
+        } else {
+          // update tokensMap and articlesMap currUrl, replace with preUrl
+          tokensMap[p_server_title] = intersectTokens;
+          articlesMap[p_server_title] = a;
+        }
+      } else {
+        // unique article
+        tokensMap[p_server_title] = currTokens;
+        articlesMap[p_server_title] = a;
+      }
+    }
+  }
+  
+  // add to index
+  for (auto& t : tokensMap) {
+    pair<string, string> serverAndTitle = t.first;
+    index.add(articlesMap[serverAndTitle], tokensMap[serverAndTitle]);
   }
 
-  const pair<string, string>& firstFeed = *feeds.cbegin();
-  const string& feedUrl = firstFeed.first;
-  const string& feedTitle = firstFeed.second;
-
-  cout << "Parsing feed named \"" << feedTitle << "\"..." << endl;
-  RSSFeed feed(feedUrl);
-  try {
-    feed.parse();
-  } catch (const RSSFeedException& rfe) {
-    log.noteSingleFeedDownloadFailure(feedUrl);
-    return;
-  }
-
-  const vector<Article>& articles = feed.getArticles();
-  if (articles.empty()) {
-    cout << "Feed is technically well-formed, but it's empty!" << endl;
-    return;
-  }
-
-  const Article& firstArticle = articles[0];
-  const string& articleTitle = firstArticle.title;
-  const string& articleUrl = firstArticle.url;
-  HTMLDocument document(articleUrl);
-
-  cout << "Parsing article with title \"" << articleTitle << "\"..." << endl;
-  try {
-    document.parse();
-  } catch (const HTMLDocumentException& hde) {
-    log.noteSingleArticleDownloadFailure(firstArticle);
-    return;
-  }
-
-  const vector<string>& tokens = document.getTokens();
-  size_t count = tokens.size();
-  cout << "The first article of the first feed list contains this many tokens: " << count << endl;
-  */
+ 
 }
