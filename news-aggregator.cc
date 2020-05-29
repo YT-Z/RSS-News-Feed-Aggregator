@@ -144,6 +144,92 @@ NewsAggregator::NewsAggregator(const string& rssFeedListURI, bool verbose):
   log(verbose), rssFeedListURI(rssFeedListURI), built(false), feedPool(kNumFeedWorkers), articlePool(kNumArticleWorkers) {}
 
 
+void NewsAggregator::processSingleArticle(const Article& a) {
+  const title& articleTitle = a.title;
+  const url& articleUrl = a.url;
+
+  const server& articleServer= getURLServer(articleUrl);
+  ServerAndTitle p_server_title = ServerAndTitle(articleServer, articleTitle);
+
+  HTMLDocument document(articleUrl);
+  try {
+    document.parse();
+  } catch (const HTMLDocumentException& hde) {
+    log.noteSingleArticleDownloadFailure(a);
+    return;
+  }
+
+  // get tokens
+  const vector<string>& tokens = document.getTokens();
+  vector<string> currTokens = tokens;
+  sort(currTokens.begin(), currTokens.end());
+
+  articlesTokensMutex.lock();
+  if (tokensMap.find(p_server_title) != tokensMap.end()) {
+    // article with same domain and title
+    string& preUrl = articlesMap[p_server_title].url;
+    const string& currUrl = document.getURL();
+
+    // get intersected tokens
+    vector<string>& preTokens = tokensMap[p_server_title];
+    vector<string> intersectTokens;
+    set_intersection(preTokens.cbegin(), preTokens.cend(), currTokens.cbegin(), currTokens.cend(), back_inserter(intersectTokens));
+
+    if (preUrl.compare(currUrl) < 0) {
+      // update tokensMap and articlesMap of preUrl
+      tokensMap[p_server_title] = intersectTokens;
+    } else {
+      // update tokensMap and articlesMap currUrl, replace with preUrl
+      tokensMap[p_server_title] = intersectTokens;
+      articlesMap[p_server_title] = a;
+    }
+    
+  } else {
+    // unique article
+    tokensMap[p_server_title] = currTokens;
+    articlesMap[p_server_title] = a;
+  }
+  articlesTokensMutex.unlock();
+}
+
+
+void NewsAggregator::processSingleFeed(const pair<url, title>& f) {
+  const url& curr_url = f.first;
+  const title& curr_title = f.second;
+  
+  visitedURLsMutex.lock();
+  if (visitedURLs.find(curr_url) != visitedURLs.end()) {
+    // duplicate url
+    log.noteSingleFeedDownloadSkipped(curr_url);
+    visitedURLsMutex.unlock();
+    return; 
+  } 
+  visitedURLs.insert(curr_url);
+  visitedURLsMutex.unlock();
+
+  RSSFeed feed(curr_url);
+  // store articles in feed
+  try {
+    log.noteSingleFeedDownloadBeginning(curr_url);
+    feed.parse();
+  } catch (const RSSFeedException& rfe) {
+    log.noteSingleFeedDownloadFailure(curr_url);
+    return;
+  }
+  log.noteSingleFeedDownloadEnd(curr_url);
+
+  // get articles
+  const vector<Article>& articles = feed.getArticles();
+
+  // for each article, store tokens in html-document
+  for (const Article& a : articles) {
+    articlePool.schedule([this, a]{
+      processSingleArticle(a);
+    });
+  }
+  log.noteAllArticlesHaveBeenScheduled(curr_title);
+  articlePool.wait();
+}
 
 /**
  * Private Method: processAllFeeds
@@ -168,72 +254,16 @@ void NewsAggregator::processAllFeeds() {
   log.noteFullRSSFeedListDownloadEnd();
 
   // get url-title map
-  const map<string, string>& feeds = feedList.getFeeds();
+  const map<url, title>& feeds = feedList.getFeeds();
 
-  
-
-  for (const pair<string, string>& f : feeds) {
-    const string& url = f.first;
-
-    if (visitedURLs.find(url) != visitedURLs.end()) continue; // duplicate url
-    visitedURLs.insert(url);
-
-    RSSFeed feed(url);
-    // store articles in feed
-    try {
-      feed.parse();
-    } catch (const RSSFeedException& rfe) {
-      log.noteSingleFeedDownloadFailure(url);
-    }
-
-    // get articles
-    const vector<Article>& articles = feed.getArticles();
-
-    // for each article, store tokens in html-document
-    for (const Article& a : articles) {
-      const title& articleTitle = a.title;
-      const string& articleUrl = a.url;
-
-      const server& articleServer= getURLServer(articleUrl);
-      ServerAndTitle p_server_title = ServerAndTitle(articleServer, articleTitle);
-
-      HTMLDocument document(articleUrl);
-      try {
-        document.parse();
-      } catch (const HTMLDocumentException& hde) {
-        log.noteSingleArticleDownloadFailure(a);
-      }
-
-      // get tokens
-      const vector<string>& tokens = document.getTokens();
-      vector<string> currTokens = tokens;
-      sort(currTokens.begin(), currTokens.end());
-
-      if (tokensMap.find(p_server_title) != tokensMap.end()) {
-        // article with same domain and title
-        string& preUrl = articlesMap[p_server_title].url;
-        const string& currUrl = document.getURL();
-
-        // get intersected tokens
-        vector<string>& preTokens = tokensMap[p_server_title];
-        vector<string> intersectTokens;
-        set_intersection(preTokens.cbegin(), preTokens.cend(), currTokens.cbegin(), currTokens.cend(), back_inserter(intersectTokens));
-  
-        if (preUrl.compare(currUrl) < 0) {
-          // update tokensMap and articlesMap of preUrl
-          tokensMap[p_server_title] = intersectTokens;
-        } else {
-          // update tokensMap and articlesMap currUrl, replace with preUrl
-          tokensMap[p_server_title] = intersectTokens;
-          articlesMap[p_server_title] = a;
-        }
-      } else {
-        // unique article
-        tokensMap[p_server_title] = currTokens;
-        articlesMap[p_server_title] = a;
-      }
-    }
+  for (const pair<url, title>& f : feeds) {
+    feedPool.schedule([this, f]{
+      processSingleFeed(f);
+    });
   }
+  log.noteAllRSSFeedsDownloadEnd();
+
+  feedPool.wait();
   
   // add to index
   for (const auto& t : tokensMap) {

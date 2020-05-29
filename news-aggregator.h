@@ -77,18 +77,15 @@ class NewsAggregator {
   ThreadPool feedPool;
   ThreadPool articlePool;
 
-  // static std::mutex indexMutex;
-  // static std:mutex visitedURLsMutex;
+  std::mutex indexMutex;
+  std::mutex visitedURLsMutex;
+  std::mutex articlesTokensMutex;
 
-  // for each url in feedlist, store articles of it in RSSfeed, store tokens in html-document
   std::set<url> visitedURLs;
-  // map< pair<serverAndTitle>,  vector<string> tokens>
   std::map<ServerAndTitle, std::vector<std::string>> tokensMap; 
   std::map<ServerAndTitle, Article> articlesMap;
 
-  // processfeeds(map<string, string>& feeds, unordered_set<string>& visitedURLs,
-  // unordered_map<pair<string, string>, vector<string>, pair_hash>& tokensMap,
-  // unordered_map<pair<string, string>, Article, pair_hash>& articlesMap);
+
 /**
  * Constructor: NewsAggregator
  * ---------------------------
@@ -105,6 +102,9 @@ class NewsAggregator {
  */
   void processAllFeeds();
 
+  void processSingleFeed(const std::pair<url, title>& feed);
+
+  void processSingleArticle(const Article& article);
 /**
  * Copy Constructor, Assignment Operator
  * -------------------------------------
