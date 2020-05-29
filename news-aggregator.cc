@@ -3,8 +3,8 @@
  * --------------------------------
  * Presents the implementation of the NewsAggregator class.
  */
-#include <unordered_map>
-#include <unordered_set>
+#include <map>
+#include <set>
 
 #include "news-aggregator.h"
 #include <iostream>
@@ -132,14 +132,7 @@ void NewsAggregator::queryIndex() const {
   }
 }
 
-struct pair_hash {
-  template<class T1, class T2>
-  std::size_t operator () (const std:: pair<T1, T2> &p) const {
-    auto h1 = std::hash<T1>{}(p.first);
-    auto h2 = std::hash<T2>{}(p.second);
-    return h1^(h2 << 1);
-  }
-};
+
 /**
  * Private Constructor: NewsAggregator
  * -----------------------------------
@@ -149,6 +142,8 @@ static const size_t kNumFeedWorkers = 8;
 static const size_t kNumArticleWorkers = 64;
 NewsAggregator::NewsAggregator(const string& rssFeedListURI, bool verbose): 
   log(verbose), rssFeedListURI(rssFeedListURI), built(false), feedPool(kNumFeedWorkers), articlePool(kNumArticleWorkers) {}
+
+
 
 /**
  * Private Method: processAllFeeds
@@ -170,15 +165,12 @@ void NewsAggregator::processAllFeeds() {
   } catch (const RSSFeedListException& rfle) {
     log.noteFullRSSFeedListDownloadFailureAndExit(rssFeedListURI);
   }
+  log.noteFullRSSFeedListDownloadEnd();
 
   // get url-title map
   const map<string, string>& feeds = feedList.getFeeds();
 
-  // for each url in feedlist, store articles of it in RSSfeed, store tokens in html-document
-  unordered_set<string> visitedURLs;
-  // map< pair<serverAndTitle>,  vector<string> tokens>
-  unordered_map<pair<string, string>, vector<string>, pair_hash> tokensMap; 
-  unordered_map<pair<string, string>, Article, pair_hash> articlesMap;
+  
 
   for (const pair<string, string>& f : feeds) {
     const string& url = f.first;
@@ -199,12 +191,11 @@ void NewsAggregator::processAllFeeds() {
 
     // for each article, store tokens in html-document
     for (const Article& a : articles) {
-      const string& articleTitle = a.title;
+      const title& articleTitle = a.title;
       const string& articleUrl = a.url;
 
-      const string& server = getURLServer(articleUrl);
-      string articleServer = server;
-      pair<string, string> p_server_title = make_pair(articleServer, articleTitle);
+      const server& articleServer= getURLServer(articleUrl);
+      ServerAndTitle p_server_title = ServerAndTitle(articleServer, articleTitle);
 
       HTMLDocument document(articleUrl);
       try {
@@ -218,8 +209,7 @@ void NewsAggregator::processAllFeeds() {
       vector<string> currTokens = tokens;
       sort(currTokens.begin(), currTokens.end());
 
-      unordered_map<pair<string, string>, vector<string>, pair_hash>::iterator it = tokensMap.find(p_server_title);
-      if (it != tokensMap.end()) {
+      if (tokensMap.find(p_server_title) != tokensMap.end()) {
         // article with same domain and title
         string& preUrl = articlesMap[p_server_title].url;
         const string& currUrl = document.getURL();
@@ -246,9 +236,8 @@ void NewsAggregator::processAllFeeds() {
   }
   
   // add to index
-  for (auto& t : tokensMap) {
-    pair<string, string> serverAndTitle = t.first;
-    index.add(articlesMap[serverAndTitle], tokensMap[serverAndTitle]);
+  for (const auto& t : tokensMap) {
+    index.add(articlesMap[t.first], tokensMap[t.first]);
   }
 
  
