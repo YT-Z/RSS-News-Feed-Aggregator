@@ -137,7 +137,7 @@ struct pair_hash {
   std::size_t operator () (const std:: pair<T1, T2> &p) const {
     auto h1 = std::hash<T1>{}(p.first);
     auto h2 = std::hash<T2>{}(p.second);
-    return h1^h2;
+    return h1^(h2 << 1);
   }
 };
 /**
@@ -192,7 +192,6 @@ void NewsAggregator::processAllFeeds() {
       feed.parse();
     } catch (const RSSFeedException& rfe) {
       log.noteSingleFeedDownloadFailure(url);
-      return;
     }
 
     // get articles
@@ -212,7 +211,6 @@ void NewsAggregator::processAllFeeds() {
         document.parse();
       } catch (const HTMLDocumentException& hde) {
         log.noteSingleArticleDownloadFailure(a);
-        return;
       }
 
       // get tokens

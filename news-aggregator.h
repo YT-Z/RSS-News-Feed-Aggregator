@@ -75,6 +75,8 @@ class NewsAggregator {
   bool built = false;
   ThreadPool feedPool;
   ThreadPool articlePool;
+
+  
   
 /**
  * Constructor: NewsAggregator
