@@ -39,14 +39,14 @@ ThreadPool::ThreadPool(size_t numThreads) : totalAvailableSemaphore(numThreads),
  * all previously scheduled thunks have been handled.
  */
 void ThreadPool::schedule(const std::function<void(void)>& thunk) {
-    thunksQueueMutex.lock();
-    thunksQueue.push(thunk);
-
     pendingWorksMutex.lock();
     numPendingWorks++;
     pendingWorksMutex.unlock();
 
+    thunksQueueMutex.lock();
+    thunksQueue.push(thunk);
     thunksQueueMutex.unlock();
+
     scheduleSemaphore.signal(); // works in schdule++
 }
 
@@ -55,21 +55,23 @@ void ThreadPool::dispatcher(){
     while (true) {
         scheduleSemaphore.wait(); // works in schedule--
         if (numPendingWorks == 0) return;
-        totalAvailableSemaphore.wait(); // totalAvailable--
 
+        totalAvailableSemaphore.wait(); // totalAvailable--
         for (size_t workerID = 0; workerID < workers.size(); workerID++) {
             workers[workerID].m.lock();
             if (workers[workerID].occupied) {
                 workers[workerID].m.unlock();
             } else {
                 workers[workerID].occupied = true;
+                workers[workerID].m.unlock();
 
                 thunksQueueMutex.lock();
                 workers[workerID].workerFunction = thunksQueue.front();
                 thunksQueue.pop();
                 thunksQueueMutex.unlock();
 
-                workers[workerID].s.signal();
+                workers[workerID].m.lock();
+                workers[workerID].s.signal(); // assigned a work to this worker
                 workers[workerID].m.unlock();
                 break;
             }
