@@ -66,7 +66,6 @@ void ThreadPool::dispatcher(){
             if (workers[workerID].occupied) {
                 workers[workerID].m.unlock();
             } else {
-                cout<<"dispatcher to: " << workerID << endl;
                 workers[workerID].occupied = true;
                 workers[workerID].m.unlock();
 
