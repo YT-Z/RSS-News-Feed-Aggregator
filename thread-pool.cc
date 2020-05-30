@@ -4,13 +4,126 @@
  * Presents the implementation of the ThreadPool class.
  */
 
+
 #include "thread-pool.h"
+
+
 
 using namespace std;
 using develop::ThreadPool;
 
-ThreadPool::ThreadPool(size_t numThreads) {}
-void ThreadPool::schedule(const std::function<void(void)>& thunk) {}
-void ThreadPool::wait() {}
-ThreadPool::~ThreadPool() {}
+/**
+ * Schedules the provided thunk (which is something that can
+ * be invoked as a zero-argument function without a return value)
+ * to be executed by one of the ThreadPool's threads as soon as
+ * all previously scheduled thunks have been handled.
+ */
+ThreadPool::ThreadPool(size_t numThreads) :  totalAvailableSemaphore(0), workers(numThreads){
+    // launceh a single dispatcher thread
+    dt = thread([this]() {
+        dispatcher();
+    });
+    // launch a specific number of worker threads
+    for (size_t workerID = 0; workerID < numThreads; workerID++) {
+        workers[workerID].t = thread([this](size_t workerID) {
+            worker(workerID);
+        }, workerID);
+    }
+
+}
+
+
+/**
+ * Schedules the provided thunk (which is something that can
+ * be invoked as a zero-argument function without a return value)
+ * to be executed by one of the ThreadPool's threads as soon as
+ * all previously scheduled thunks have been handled.
+ */
+void ThreadPool::schedule(const std::function<void(void)>& thunk) {
+    thunksQueueMutex.lock();
+    thunksQueue.push(thunk);
+
+    pendingWorksMutex.lock();
+    numPendingWorks++;
+    pendingWorksMutex.unlock();
+
+    thunksQueueMutex.unlock();
+    scheduleSemaphore.signal(); // works in schdule++
+}
+
+// dispatch work to available worker
+void ThreadPool::dispatcher(){
+    while (true) {
+        scheduleSemaphore.wait(); // works in schedule--
+        if (numPendingWorks == 0) return;
+        totalAvailableSemaphore.wait(); // totalAvailable--
+
+        for (size_t workerID = 0; workerID < workers.size(); workerID++) {
+            workers[workerID].m.lock();
+            if (workers[workerID].occupied) {
+                workers[workerID].m.unlock();
+            } else {
+                workers[workerID].occupied = true;
+
+                thunksQueueMutex.lock();
+                workers[workerID].workerFunction = thunksQueue.front();
+                thunksQueue.pop();
+                thunksQueueMutex.unlock();
+
+                workers[workerID].s.signal();
+                workers[workerID].m.unlock();
+                break;
+            }
+           
+        }
+
+    }
+}
+
+// excute an assigned function
+void ThreadPool::worker(size_t workerID) {
+    while (true) {
+        workers[workerID].s.wait();
+        if (numPendingWorks == 0) return;
+
+        workers[workerID].workerFunction();
+
+        workers[workerID].m.lock();
+        workers[workerID].occupied = false;
+        workers[workerID].m.unlock();
+
+        totalAvailableSemaphore.signal(); // totalAvailable++
+
+        pendingWorksMutex.lock();
+        numPendingWorks--;
+        pendingWorksMutex.unlock();
+        cv.notify_all(); // wake up wait()
+    }
+}
+/**
+ * Blocks and waits until all previously scheduled thunks
+ * have been executed in full.
+ */
+void ThreadPool::wait() {
+    lock_guard<mutex> lg(cvMutex);
+    cv.wait(cvMutex, [this] {
+        return numPendingWorks == 0;
+    });
+}
+
+/**
+ * Destroys the ThreadPool class
+ */
+ThreadPool::~ThreadPool() {
+    wait();
+    scheduleSemaphore.signal();
+    for (size_t workerID = 0; workerID < workers.size(); workerID++) {
+        workers[workerID].s.signal();
+    }
+
+    dt.join();
+    for (size_t workerID = 0; workerID < workers.size(); workerID++) {
+        workers[workerID].t.join();
+    }
+}
 

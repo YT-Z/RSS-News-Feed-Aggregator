@@ -14,6 +14,11 @@
 
 #include <cstdlib>
 #include <functional>
+#include <queue>
+#include <mutex>
+#include "semaphore.h"
+#include <thread>
+#include <condition_variable>
 // place additional #include statements here
 
 namespace develop {
@@ -47,6 +52,32 @@ class ThreadPool {
   void wait();
 
  private:
+  std::thread dt;
+
+  int numPendingWorks;
+  std::mutex pendingWorksMutex;
+
+  std::mutex cvMutex;
+  std::condition_variable_any cv;
+  
+  std::queue<std::function<void(void)>> thunksQueue;
+  std::mutex thunksQueueMutex;
+
+  semaphore scheduleSemaphore; // communication between schedule and dispatcher
+  semaphore totalAvailableSemaphore; // the total available number of worker
+
+
+  struct workerInfo {
+    semaphore s;
+    std::thread t;
+    std::mutex m;
+    bool occupied;
+    std::function<void(void)> workerFunction;
+  };
+  std::vector<workerInfo> workers;
+
+  void dispatcher();
+  void worker(size_t workerID);
   
   ThreadPool(const ThreadPool& original) = delete;
   ThreadPool& operator=(const ThreadPool& rhs) = delete;
