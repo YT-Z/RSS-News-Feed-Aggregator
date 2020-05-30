@@ -61,6 +61,7 @@ class ThreadPool {
 
   int numPendingWorks;
   std::mutex pendingWorksMutex;
+  bool allDone;
 
   std::mutex cvMutex;
   std::condition_variable_any cv;
