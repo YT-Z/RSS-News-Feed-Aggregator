@@ -57,8 +57,8 @@ void ThreadPool::dispatcher(){
     while (true) {
         scheduleSemaphore.wait(); // works in schedule--
         totalAvailableSemaphore.wait(); // totalAvailable--
+
         if (allDone) {
-            cvMutex.unlock();
             return;
         }
         for (size_t workerID = 0; workerID < workers.size(); workerID++) {
@@ -90,7 +90,6 @@ void ThreadPool::worker(size_t workerID) {
     while (true) {
         workers[workerID].s.wait();
         if (allDone) {
-            cvMutex.unlock();
             return;
         }
 
