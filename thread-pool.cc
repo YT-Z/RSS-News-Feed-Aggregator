@@ -17,7 +17,9 @@ using develop::ThreadPool;
  * to be executed by one of the ThreadPool's threads as soon as
  * all previously scheduled thunks have been handled.
  */
-ThreadPool::ThreadPool(size_t numThreads) : totalAvailableSemaphore(numThreads), workers(numThreads){
+ThreadPool::ThreadPool(size_t numThreads) : 
+         numPendingWorks(0), allDone(false), scheduleSemaphore(0), 
+         totalAvailableSemaphore(numThreads), workers(numThreads){
     // launceh a single dispatcher thread
     dt = thread([this]() {
         dispatcher();
