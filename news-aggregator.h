@@ -22,7 +22,7 @@
 #include "thread-pool-release.h"
 #include "thread-pool.h"
 
-namespace tp = develop;//release;
+namespace tp = release;
 using tp::ThreadPool;
 
 class NewsAggregator {
