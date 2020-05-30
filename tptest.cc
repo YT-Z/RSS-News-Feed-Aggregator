@@ -11,7 +11,7 @@
 #include "ostreamlock.h"
 using namespace std;
 
-namespace tp = develop;
+namespace tp = release; //develop;
 using tp::ThreadPool;
 
 static const size_t kNumThreads = 12;
