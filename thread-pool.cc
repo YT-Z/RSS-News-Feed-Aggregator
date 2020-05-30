@@ -99,7 +99,6 @@ void ThreadPool::worker(size_t workerID) {
         }
 
         workers[workerID].workerFunction();
-        cout<< "worker:" << workerID << ",occupiec?should be T: "<< workers[workerID].occupied <<endl;
         workers[workerID].m.lock();
         workers[workerID].occupied = false;
         workers[workerID].m.unlock();
@@ -108,7 +107,6 @@ void ThreadPool::worker(size_t workerID) {
 
         pendingWorksMutex.lock();
         numPendingWorks--;
-        cout<<"pending works:"<< numPendingWorks<< endl;
         pendingWorksMutex.unlock();
         cv.notify_all(); // wake up wait()
     }
