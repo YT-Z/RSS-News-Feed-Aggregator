@@ -71,7 +71,7 @@ void ThreadPool::dispatcher(){
                 thunksQueueMutex.unlock();
 
                 workers[workerID].m.lock();
-                workers[workerID].s.signal(); // assigned a work to this worker
+                workers[workerID].s.signal(); // inform worker there is a work to do
                 workers[workerID].m.unlock();
                 break;
             }
