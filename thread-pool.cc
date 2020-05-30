@@ -54,7 +54,10 @@ void ThreadPool::schedule(const std::function<void(void)>& thunk) {
 void ThreadPool::dispatcher(){
     while (true) {
         scheduleSemaphore.wait(); // works in schedule--
-        if (numPendingWorks == 0) return;
+        if (numPendingWorks == 0) {
+            cvMutex.unlock();
+            return;
+        }
 
         totalAvailableSemaphore.wait(); // totalAvailable--
         for (size_t workerID = 0; workerID < workers.size(); workerID++) {
@@ -85,7 +88,10 @@ void ThreadPool::dispatcher(){
 void ThreadPool::worker(size_t workerID) {
     while (true) {
         workers[workerID].s.wait();
-        if (numPendingWorks == 0) return;
+        if (numPendingWorks == 0) {
+            cvMutex.unlock();
+            return;
+        }
 
         workers[workerID].workerFunction();
 
