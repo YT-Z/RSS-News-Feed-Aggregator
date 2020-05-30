@@ -6,8 +6,6 @@
  */
 #include "thread-pool.h"
 #include <iostream>
-#include "ostreamlock.h"
-#include "thread-utils.h"
 
 
 using namespace std;
@@ -66,10 +64,15 @@ void ThreadPool::dispatcher(){
             if (workers[workerID].occupied) {
                 workers[workerID].m.unlock();
             } else {
+                cout<<"dispatcher to: " << workerID << endl;
                 workers[workerID].occupied = true;
                 workers[workerID].m.unlock();
 
                 thunksQueueMutex.lock();
+                if (thunksQueue.empty()) {
+                    thunksQueueMutex.unlock();
+                    break;
+                }
                 workers[workerID].workerFunction = thunksQueue.front();
                 thunksQueue.pop();
                 thunksQueueMutex.unlock();
@@ -94,7 +97,7 @@ void ThreadPool::worker(size_t workerID) {
         }
 
         workers[workerID].workerFunction();
-
+        cout<< "worker:" << workerID << ",occupiec?should be T: "<< workers[workerID].occupied <<endl;
         workers[workerID].m.lock();
         workers[workerID].occupied = false;
         workers[workerID].m.unlock();
@@ -103,6 +106,7 @@ void ThreadPool::worker(size_t workerID) {
 
         pendingWorksMutex.lock();
         numPendingWorks--;
+        cout<<"pending works:"<< numPendingWorks<< endl;
         pendingWorksMutex.unlock();
         cv.notify_all(); // wake up wait()
     }
