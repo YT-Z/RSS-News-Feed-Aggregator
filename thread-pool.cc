@@ -116,6 +116,7 @@ void ThreadPool::wait() {
     cv.wait(cvMutex, [this] {
         return numPendingWorks == 0;
     });
+    cvMutex.unlock();
 }
 
 /**
