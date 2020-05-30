@@ -54,12 +54,11 @@ void ThreadPool::schedule(const std::function<void(void)>& thunk) {
 void ThreadPool::dispatcher(){
     while (true) {
         scheduleSemaphore.wait(); // works in schedule--
+        totalAvailableSemaphore.wait(); // totalAvailable--
         if (allDone) {
             cvMutex.unlock();
             return;
         }
-
-        totalAvailableSemaphore.wait(); // totalAvailable--
         for (size_t workerID = 0; workerID < workers.size(); workerID++) {
             workers[workerID].m.lock();
             if (workers[workerID].occupied) {
@@ -125,6 +124,7 @@ ThreadPool::~ThreadPool() {
     wait();
     allDone = true;
     scheduleSemaphore.signal();
+    totalAvailableSemaphore.signal();
     for (size_t workerID = 0; workerID < workers.size(); workerID++) {
         workers[workerID].s.signal();
     }
