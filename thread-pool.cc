@@ -1,85 +1,95 @@
+
+
 #include "thread-pool.h"
-#include <algorithm>
+#include <iostream>
+#include "ostreamlock.h"
+#include "thread-utils.h"
 using namespace std;
 using develop::ThreadPool;
 
-void ThreadPool::dispatcher() {
-  while (true) {
-    lock_guard<mutex> lgThunkQueue(mThunkQueue);
-    cvThunkQueue.wait(mThunkQueue, [this]{
-      return !thunkQueue.empty() || exit;
-    });
-    if (exit) return;
-    mThunkQueue.unlock();
-    lock_guard<mutex> lgWorkerStatus(mWorkerStatus);
-    cvWorkerStatus.wait(mWorkerStatus, [this]{
-      return find(wBusy.begin(), wBusy.end(), false) != wBusy.end();
-    });
-    for (size_t workerID = 0; workerID < wBusy.size(); workerID++) {
-      if (!wBusy[workerID]) {
-        wBusy[workerID] = true;
-        mWorkerStatus.unlock();
-        cvWorkerStatus.notify_all();
-        mThunkQueue.lock();
-        wThunks[workerID] = thunkQueue.front();
-        thunkQueue.pop();
-        mThunkQueue.unlock();
-        cvThunkQueue.notify_all();
-        sWorkers[workerID].signal();
-        break;
-      }
-    }
-  }
+// constructor
+ThreadPool::ThreadPool(size_t numThreads) : wts(numThreads), workerNum(numThreads), execNum(0), sd(0), dw_wr(numThreads), dw_rd(0) {
+	dt = thread([this]() { dispatcher(); }); 
+	for (size_t workerID = 0; workerID < numThreads; workerID++) {
+		wts[workerID] = thread([this](size_t workerID) { worker(workerID); }, workerID); 
+	}
 }
 
-void ThreadPool::worker(size_t workerID) {
-  while (true) {
-    sWorkers[workerID].wait();
-    if (exit) return;
-    wThunks[workerID]();
-    lock_guard<mutex> lgWorkerStatus(mWorkerStatus);
-    wBusy[workerID] = false;
-    mWorkerStatus.unlock();
-    cvWorkerStatus.notify_all();
-  }
-}
-
-ThreadPool::ThreadPool(size_t numThreads) : wts(numThreads), exit(false),
-  wBusy(numThreads, false), wThunks(numThreads), sWorkers(numThreads) {
-  dt = thread([this]() { dispatcher(); });
-  for (size_t workerID = 0; workerID < numThreads; workerID++) {
-    wts[workerID] = thread([this](size_t workerID) {
-      worker(workerID);
-    }, workerID);
-  }
-}
-
+// schedule
 void ThreadPool::schedule(const function<void(void)>& thunk) {
-  lock_guard<mutex> lgThunkQueue(mThunkQueue);
-  thunkQueue.push(thunk);
-  mThunkQueue.unlock();
-  cvThunkQueue.notify_all();
+	v_lock.lock();
+	execNum++;
+	v_lock.unlock();
+	q_lock.lock();
+	q1.push(thunk);
+	q_lock.unlock();
+	sd.signal();
 }
 
+// wait
 void ThreadPool::wait() {
-  lock_guard<mutex> lgThunkQueue(mThunkQueue);
-  cvThunkQueue.wait(mThunkQueue, [this]{ return thunkQueue.empty(); });
-  mThunkQueue.unlock();
-  lock_guard<mutex> lgWorkerStatus(mWorkerStatus);
-  cvWorkerStatus.wait(mWorkerStatus, [this]{
-    return find(wBusy.begin(), wBusy.end(), true) == wBusy.end();
-  });
-  mWorkerStatus.unlock();
+	unique_lock<mutex> ul(v_lock);
+	cv.wait(ul, [this]{ return execNum == 0; });
 }
 
+// dispatcher
+void ThreadPool::dispatcher() {
+	while(true) {
+		sd.wait();
+		dw_wr.wait();
+		q_lock.lock();
+		if(q1.empty()) {
+			q_lock.unlock();
+			break;
+		} else {
+			q2.push(q1.front());
+			q1.pop();
+			q_lock.unlock();
+			dw_rd.signal();
+		}
+	}
+}
+
+// worker
+void ThreadPool::worker(size_t workerID) {
+	while(true) {
+		dw_rd.wait();
+		q_lock.lock();
+		if(q2.empty()) {
+			q_lock.unlock();
+			break;
+		} else {
+			const function<void(void)> thunk = q2.front();
+			q2.pop();
+			q_lock.unlock();
+			thunk();	// execute the function
+			dw_wr.signal();
+			v_lock.lock();
+			execNum--;	// decrement total function to be excuted
+			v_lock.unlock();
+			cv.notify_all();	// try to awake wait
+		}
+	}
+}
+
+// destructor
 ThreadPool::~ThreadPool() {
-  wait();
-  exit = true;
-  cvThunkQueue.notify_all();
-  cvWorkerStatus.notify_all();
-  for (semaphore& s : sWorkers) s.signal();
-  dt.join();
-  for (thread& t : wts) t.join();
+	while(true) { 
+		if(q1.empty()) {
+			sd.signal(); 
+			break;
+		}
+	}
+	while(true) {
+		if(q2.empty()) {
+			for (size_t workerID = 0; workerID < workerNum; workerID++) {
+				dw_rd.signal(); 
+			}
+			break;
+		}
+	}
+	dt.join();	// reclaim dispatcher
+	for(size_t workerID = 0; workerID < workerNum; workerID++) { wts[workerID].join(); }	// reclaim workers
 }
 
 
